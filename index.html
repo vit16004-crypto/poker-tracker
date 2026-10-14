@@ -134,6 +134,21 @@
 
   .empty { text-align: center; color: var(--muted); padding: 30px 10px; font-size: 15px; }
 
+  .month-row {
+    display: flex; align-items: center; gap: 10px;
+    background: rgba(0,0,0,.18);
+    border: 1px solid var(--line); border-radius: 10px;
+    padding: 11px 12px; margin-bottom: 8px; cursor: pointer;
+  }
+  .month-row:active { opacity: .8; }
+  .month-row.active { border-color: var(--green); background: rgba(53,208,127,.1); }
+  .month-row .m-name { font-size: 15px; font-weight: 600; }
+  .month-row .m-sub { font-size: 12px; color: var(--muted); margin-top: 3px; }
+  .month-row .m-amt { font-size: 17px; font-weight: 700; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .month-row .m-amt.pos { color: var(--green); }
+  .month-row .m-amt.neg { color: var(--red); }
+  .month-row .m-amt.zero { color: var(--muted); }
+
   .toolbar { display: flex; gap: 8px; margin-bottom: 14px; }
   .toolbar button { font-size: 14px; padding: 10px; }
 
@@ -233,6 +248,11 @@
     <div id="history"></div>
   </section>
 
+  <section class="panel">
+    <h2>Статистика по месяцам</h2>
+    <div id="monthStats"></div>
+  </section>
+
 </div>
 
 <dialog id="confirmDialog">
@@ -254,6 +274,8 @@
   var sessions = [];
   var editingId = null;
   var filter = 'all';
+  var MONTH_NAMES = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь',
+                     'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь'];
 
   var $ = function (id) { return document.getElementById(id); };
 
@@ -384,6 +406,7 @@
     var ym = now.getFullYear() + '-' + String(now.getMonth() + 1).padStart(2, '0');
     return sessions.filter(function (s) {
       if (filter === 'month') return String(s.date).slice(0, 7) === ym;
+      if (filter.indexOf('m:') === 0) return String(s.date).slice(0, 7) === filter.slice(2);
       if (filter === 'win') return result(s) > 0;
       if (filter === 'loss') return result(s) < 0;
       return true;
@@ -393,7 +416,67 @@
     });
   }
 
+  function renderMonths() {
+    var map = {};
+    sessions.forEach(function (s) {
+      var ym = String(s.date).slice(0, 7);
+      if (!/^\d{4}-\d{2}$/.test(ym)) return;
+      if (!map[ym]) map[ym] = { ym: ym, total: 0, n: 0, w: 0, l: 0, buyin: 0, cashout: 0 };
+      var m = map[ym];
+      var r = result(s);
+      m.total += r;
+      m.n++;
+      m.buyin += s.buyin;
+      m.cashout += s.cashout;
+      if (r > 0) m.w++; else if (r < 0) m.l++;
+    });
+
+    var box = $('monthStats');
+    var keys = Object.keys(map).sort().reverse();
+    if (!keys.length) {
+      box.innerHTML = '<div class="empty">Статистика появится<br>после первой сессии</div>';
+      return;
+    }
+    box.innerHTML = keys.map(function (k) {
+      var m = map[k];
+      m.total = round2(m.total);
+      var parts = k.split('-');
+      var name = MONTH_NAMES[parseInt(parts[1], 10) - 1] + ' ' + parts[0];
+      var active = filter === 'm:' + k ? ' active' : '';
+      var acls = m.total > 0 ? 'pos' : m.total < 0 ? 'neg' : 'zero';
+      return '<div class="month-row' + active + '" data-month="' + k + '">' +
+        '<div style="flex:1;min-width:0">' +
+          '<div class="m-name">' + name + '</div>' +
+          '<div class="m-sub">' + m.n + ' ' + plural(m.n, 'игра', 'игры', 'игр') +
+            ' · ' + m.w + '✓ / ' + m.l + '✗' +
+            ' · вход ' + money(round2(m.buyin)) + ' → выход ' + money(round2(m.cashout)) +
+          '</div>' +
+        '</div>' +
+        '<div class="m-amt ' + acls + '">' + (m.total > 0 ? '+' : '') + money(m.total) + '</div>' +
+      '</div>';
+    }).join('');
+  }
+
+  function plural(n, one, few, many) {
+    var n10 = n % 10, n100 = n % 100;
+    if (n10 === 1 && n100 !== 11) return one;
+    if (n10 >= 2 && n10 <= 4 && (n100 < 10 || n100 >= 20)) return few;
+    return many;
+  }
+
+  $('monthStats').addEventListener('click', function (e) {
+    var row = e.target.closest('[data-month]');
+    if (!row) return;
+    var ym = row.getAttribute('data-month');
+    filter = (filter === 'm:' + ym) ? 'all' : 'm:' + ym;
+    document.querySelectorAll('.tabs button').forEach(function (x) { x.classList.remove('active'); });
+    render();
+    $('history').scrollIntoView({ behavior: 'smooth', block: 'start' });
+  });
+
   function render() {
+    renderMonths();
+
     /* summary */
     var total = 0, wins = 0, losses = 0;
     sessions.forEach(function (s) {
